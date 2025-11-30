@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Multi DApp Launcher</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+      color: #fff;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      max-width: 700px;
+      margin: 40px auto;
+      background: rgba(255,255,255,0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 30px;
+      box-shadow: 0 15px 35px rgba(0,0,0,0.3);
+    }
+    h1 { text-align: center; margin-bottom: 20px; font-size: 2.2em; }
+    .info { text-align: center; margin: 15px 0; font-size: 1.1em; }
+    .input-group {
+      margin: 15px 0;
+      display: flex;
+      flex-direction: column;
+    }
+    label { margin-bottom: 8px; font-weight: 600; }
+    input, button, select {
+      padding: 12px;
+      border-radius: 10px;
+      border: none;
+      font-size: 1em;
+      margin: 5px 0;
+    }
+    input, select { background: rgba(255,255,255,0.2); color: white; }
+    input::placeholder, select { color: #ccc; }
+    button {
+      background: #00d2ff;
+      color: #000;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+    button:hover { background: #00b0d4; transform: scale(1.03); }
+    button:disabled { background: #666; cursor: not-allowed; }
+    .status { margin-top: 15px; font-size: 0.9em; text-align: center; }
+    .contract { font-size: 0.75em; word-break: break-all; margin-top: 20px; opacity: 0.7; }
+    .dapp-section { margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.2); }
+    .hidden { display: none; }
+  </style>
+
+  <!-- Ethers.js -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1>Multi DApp Launcher</h1>
+    <p class="info">Connect to any contract on Sonic Chain</p>
+
+    <!-- Contract Address Input -->
+    <div class="input-group">
+      <label>Contract Address</label>
+      <input type="text" id="contractAddress" placeholder="0x1D6E52540c0377141d7D255B2ac6CB0fcdb44990" />
+    </div>
+
+    <!-- Predefined DApps (Optional) -->
+    <div class="input-group">
+      <label>Or Select DApp</label>
+      <select id="dappSelect">
+        <option value="">-- Custom Contract --</option>
+        <option value='{"name":"Sonic Lucky Bet","address":"0x1D6E52540c0377141d7D255B2ac6CB0fcdb44990","abi":null}'>Sonic Lucky Bet</option>
+        <option value='{"name":"Sonic Dice","address":"0xAbc...","abi":null}'>Sonic Dice (Coming Soon)</option>
+      </select>
+    </div>
+
+    <button id="connectBtn">Connect & Load Contract</button>
+
+    <p class="status" id="status">Status: Not connected</p>
+    <p class="contract">Contract: <span id="contractAddr">-</span></p>
+
+    <!-- Dynamic DApp UI will be injected here -->
+    <div id="dappInterface"></div>
+  </div>
+
+  <script>
+    const RPC_URL = "https://rpc.soniclabs.com";
+    const CHAIN_ID = 146;
+
+    let provider, signer, contract, userAddress;
+    const connectBtn = document.getElementById("connectBtn");
+    const status = document.getElementById("status");
+    const contractAddr = document.getElementById("contractAddr");
+    const dappInterface = document.getElementById("dappInterface");
+    const contractInput = document.getElementById("contractAddress");
+    const dappSelect = document.getElementById("dappSelect");
+
+    // Default ABI for Sonic Lucky Bet (tum alag ABI bhi daal sakte ho)
+    const DEFAULT_ABI = [{"inputs":[],"stateMutability":"nonpayable","type":"constructor"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"player","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"},{"indexed":false,"internalType":"uint16","name":"number","type":"uint16"},{"indexed":false,"internalType":"address","name":"referrer","type":"address"},{"indexed":false,"internalType":"uint256","name":"roundId","type":"uint256"}],"name":"BetPlaced","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"referrer","type":"address"},{"indexed":false,"internalType":"uint256","name":"bonus","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"roundId","type":"uint256"}],"name":"ReferralBonus","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"player","type":"address"},{"indexed":false,"internalType":"uint256","name":"reward","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"roundId","type":"uint256"}],"name":"RewardClaimed","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"uint256","name":"roundId","type":"uint256"},{"indexed":false,"internalType":"uint16","name":"winnerNumber","type":"uint16"}],"name":"RoundResult","type":"event"},{"inputs":[],"name":"checkRound","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"_roundId","type":"uint256"}],"name":"claimReward","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"currentRound","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getContractBalance","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"_roundId","type":"uint256"}],"name":"getRoundTotals","outputs":[{"internalType":"uint256[1000]","name":"totals","type":"uint256[1000]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"_roundId","type":"uint256"}],"name":"getTimeLeft","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"_roundId","type":"uint256"}],"name":"getWinner","outputs":[{"internalType":"uint16","name":"","type":"uint16"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"pauseGame","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"paused","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint16","name":"_number","type":"uint16"},{"internalType":"address","name":"_referrer","type":"address"}],"name":"placeBet","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[{"internalType":"uint256","name":"_roundId","type":"uint256"}],"name":"refundAll","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"roundDuration","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"rounds","outputs":[{"internalType":"uint256","name":"startTime","type":"uint256"},{"internalType":"uint256","name":"endTime","type":"uint256"},{"internalType":"bool","name":"resultDeclared","type":"bool"},{"internalType":"uint16","name":"winnerNumber","type":"uint16"},{"internalType":"uint256","name":"totalBet","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"unpauseGame","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"withdraw","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"withdrawAll","outputs":[],"stateMutability":"nonpayable","type":"function"}];
+
+    // DApp Templates
+    const DAPP_TEMPLATES = {
+      "Sonic Lucky Bet": () => `
+        <div class="dapp-section">
+          <h3>Sonic Lucky Bet</h3>
+          <p>Round: <span id="roundId">-</span> | Balance: <span id="contractBal">-</span> S</p>
+
+          <div class="input-group">
+            <label>Bet Amount (S)</label>
+            <input type="number" id="betAmount" placeholder="0.01" step="0.001" min="0.001" />
+          </div>
+          <div class="input-group">
+            <label>Your Number (1-999)</label>
+            <input type="number" id="betNumber" placeholder="777" min="1" max="999" />
+          </div>
+          <div class="input-group">
+            <label>Referrer (Optional)</label>
+            <input type="text" id="referrer" placeholder="0x..." />
+          </div>
+          <button onclick="placeBet()">Place Bet</button>
+
+          <div class="input-group" style="margin-top: 20px;">
+            <label>Claim Reward (Round ID)</label>
+            <input type="number" id="claimRound" placeholder="1" />
+            <button onclick="claimReward()">Claim Reward</button>
+          </div>
+
+          <button onclick="checkRound()" style="margin-top: 10px;">Check Current Round</button>
+        </div>
+      `
+    };
+
+    // Connect Wallet + Load Contract
+    async function connectWallet() {
+      if (!window.ethereum) return alert("Install MetaMask!");
+      try {
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        await provider.send("eth_requestAccounts", []);
+        const network = await provider.getNetwork();
+        if (network.chainId !== CHAIN_ID) {
+          try {
+            await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x" + CHAIN_ID.toString(16) }] });
+          } catch {
+            await window.ethereum.request({
+              method: "wallet_addEthereumChain",
+              params: [{
+                chainId: "0x" + CHAIN_ID.toString(16),
+                chainName: "Sonic",
+                rpcUrls: [RPC_URL],
+                nativeCurrency: { symbol: "S", decimals: 18 },
+                blockExplorerUrls: ["https://sonicscan.org"]
+              }]
+            });
+          }
+        }
+        signer = provider.getSigner();
+        userAddress = await signer.getAddress();
+        status.innerText = `Connected: ${userAddress.slice(0,6)}...`;
+        connectBtn.innerText = "Reload Contract";
+        return true;
+      } catch (err) {
+        status.innerText = "Error: " + err.message;
+        return false;
+      }
+    }
+
+    // Load Contract & UI
+    async function loadContract() {
+      const addr = contractInput.value.trim();
+      if (!addr || !ethers.utils.isAddress(addr)) {
+        alert("Invalid contract address!");
+        return;
+      }
+
+      if (!await connectWallet()) return;
+
+      try {
+        contract = new ethers.Contract(addr, DEFAULT_ABI, signer);
+        contractAddr.innerText = addr.slice(0,8) + "..." + addr.slice(-6);
+        status.innerText = "Contract loaded!";
+
+        // Auto-detect DApp and load UI
+        const templateKey = Object.keys(DAPP_TEMPLATES).find(name => 
+          contractInput.value.toLowerCase().includes("1d6e") || dappSelect.selectedOptions[0].text.includes(name)
+        ) || "Sonic Lucky Bet";
+
+        dappInterface.innerHTML = DAPP_TEMPLATES[templateKey]();
+        loadLuckyBetData(); // Auto load for Lucky Bet
+
+      } catch (err) {
+        status.innerText = "Failed to load contract: " + err.message;
+      }
+    }
+
+    // Lucky Bet Specific Functions
+    async function loadLuckyBetData() {
+      try {
+        const current = await contract.currentRound();
+        const balance = await contract.getContractBalance();
+        document.getElementById("roundId").innerText = current.toString();
+        document.getElementById("contractBal").innerText = ethers.utils.formatEther(balance);
+      } catch (err) { console.error(err); }
+    }
+
+    async function placeBet() {
+      const amount = document.getElementById("betAmount").value;
+      const number = document.getElementById("betNumber").value;
+      const referrer = document.getElementById("referrer").value || "0x0000000000000000000000000000000000000000";
+      if (!amount || !number) return alert("Fill all fields!");
+      try {
+        const tx = await contract.placeBet(number, referrer, { value: ethers.utils.parseEther(amount) });
+        status.innerText = "Bet sent...";
+        await tx.wait();
+        status.innerText = "Bet placed!";
+        loadLuckyBetData();
+      } catch (err) { status.innerText = "Failed: " + err.message; }
+    }
+
+    async function claimReward() {
+      const round = document.getElementById("claimRound").value;
+      if (!round) return alert("Enter round!");
+      try {
+        const tx = await contract.claimReward(round);
+        status.innerText = "Claiming...";
+        await tx.wait();
+        status.innerText = "Claimed!";
+      } catch (err) { status.innerText = "Failed: " + err.message; }
+    }
+
+    async function checkRound() {
+      try {
+        await contract.checkRound();
+        status.innerText = "Round checked!";
+        loadLuckyBetData();
+      } catch (err) { status.innerText = "Failed: " + err.message; }
+    }
+
+    // Event Listeners
+    connectBtn.addEventListener("click", loadContract);
+    dappSelect.addEventListener("change", () => {
+      if (dappSelect.value) {
+        const data = JSON.parse(dappSelect.value);
+        contractInput.value = data.address;
+      }
+    });
+
+    // Auto connect if already logged in
+    window.addEventListener("load", () => {
+      if (window.ethereum?.selectedAddress) {
+        connectWallet();
+      }
+    });
+  </script>
+</body>
+</html>
